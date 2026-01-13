@@ -38,38 +38,50 @@ def get_gpu_arch():
     return None
 
 def get_arch_flags():
-    # Check NVCC Version
-    # NOTE The "CUDA_HOME" here is not necessarily from the `CUDA_HOME` environment variable. For more details, see `torch/utils/cpp_extension.py`
     assert CUDA_HOME is not None, "PyTorch must be compiled with CUDA support"
-    nvcc_version = subprocess.check_output(
-        [os.path.join(CUDA_HOME, "bin", "nvcc"), '--version'], stderr=subprocess.STDOUT
-    ).decode('utf-8')
-    nvcc_version_number = nvcc_version.split('release ')[1].split(',')[0].strip()
-    major, minor = map(int, nvcc_version_number.split('.'))
-    print(f'Compiling using NVCC {major}.{minor}')
 
+    nvcc_version = subprocess.check_output(
+        [os.path.join(CUDA_HOME, "bin", "nvcc"), "--version"],
+        stderr=subprocess.STDOUT,
+    ).decode("utf-8")
+    nvcc_version_number = nvcc_version.split("release ")[1].split(",")[0].strip()
+    major, minor = map(int, nvcc_version_number.split("."))
+    print(f"Compiling using NVCC {major}.{minor}")
+
+    DISABLE_SM103 = is_flag_set("FLASH_MLA_DISABLE_SM103")
     DISABLE_SM120 = is_flag_set("FLASH_MLA_DISABLE_SM120")
     DISABLE_SM100 = is_flag_set("FLASH_MLA_DISABLE_SM100")
-    DISABLE_SM90 = is_flag_set("FLASH_MLA_DISABLE_SM90")
+    DISABLE_SM90  = is_flag_set("FLASH_MLA_DISABLE_SM90")
 
     # SM120 requires NVCC 12.9+
     if major < 12 or (major == 12 and minor <= 8):
         DISABLE_SM120 = True
         if not DISABLE_SM100:
-            assert False, "sm100 compilation for Flash MLA requires NVCC 12.9 or higher. Please set FLASH_MLA_DISABLE_SM100=1 to disable sm100 compilation, or update your environment."
+            raise AssertionError(
+                "sm100 compilation for Flash MLA requires NVCC 12.9 or higher. "
+                "Please set FLASH_MLA_DISABLE_SM100=1 to disable sm100 compilation, "
+                "or update your environment."
+            )
 
-    # Auto-detect SM120 (RTX PRO 6000 Blackwell workstation)
-    gpu_arch = get_gpu_arch()
+    # Auto-detect GPU arch (via torch)
+    gpu_arch = get_gpu_arch()  # returns e.g. 103 for sm_103
+
+    if gpu_arch == 103 and not DISABLE_SM103:
+        print("Detected SM103 GPU")
     if gpu_arch == 120 and not DISABLE_SM120:
-        print(f'Detected SM120 GPU (RTX PRO 6000 Blackwell workstation)')
+        print("Detected SM120 GPU")
 
     arch_flags = []
+
+    if not DISABLE_SM103:
+        arch_flags.extend(["-gencode", "arch=compute_103,code=sm_103"])
     if not DISABLE_SM120:
         arch_flags.extend(["-gencode", "arch=compute_120,code=sm_120"])
     if not DISABLE_SM100:
         arch_flags.extend(["-gencode", "arch=compute_100a,code=sm_100a"])
     if not DISABLE_SM90:
         arch_flags.extend(["-gencode", "arch=compute_90a,code=sm_90a"])
+
     return arch_flags
 
 def get_nvcc_thread_args():
